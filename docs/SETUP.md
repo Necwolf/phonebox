@@ -109,7 +109,7 @@ curl -fsSL https://raw.githubusercontent.com/ersinkoc/phonebox/main/setup.sh | b
 ### 2. Connect the phone
 
 - **Over USB** (recommended): it wakes the phone on plug-in, updates the app and falls back to USB when Wi-Fi drops.
-  The phone needs Android 7.0 or later with USB debugging turned on:
+  The phone needs Android 5.0 or later (Android 6 or later recommended) with USB debugging turned on:
   1. *Settings › About phone*: tap *Build number* seven times.
   2. *Developer options*: turn on *USB debugging*. On Xiaomi, Redmi and POCO, also turn on *Install via USB*.
   3. Plug the phone in with a data cable and answer *Allow USB debugging?* with *Allow*.

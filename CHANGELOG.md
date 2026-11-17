@@ -17,6 +17,12 @@
   and the phone only ever sends which key was tapped. macOS and Linux show that it needs Windows. Idea and first
   version in #48 by [blx10](https://github.com/blx10).
 
+**Android app**
+- The app installs on Android 5.0 and 6.0 too (it was Android 7.0). Android 6 phones get everything, as their WebView
+  updates go up to version 106. On Android 5 the last WebView is 95, so the panel runs but widgets don't scale as well
+  and the WebView notice stays. Not yet tried on an Android 5 or 6 device (#184,
+  [phongnguyen2277](https://github.com/phongnguyen2277)).
+
 **Agent**
 - Windows: the CPU temperature also works on older Intel processors that LibreHardwareMonitor reports only per core
   ("CPU Core #1"…): the hottest core of the CPU is shown when there is no package reading (idea and first version in
