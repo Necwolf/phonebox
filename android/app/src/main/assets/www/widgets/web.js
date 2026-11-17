@@ -181,8 +181,13 @@ W.outages = {
       }
       // the first stretch that isn't "on" decides: a cut to count down to, or a gap nobody knows about
       const next = data.runs.slice(data.runs.indexOf(cur) + 1).find((x) => x.state !== 'on');
-      if (next?.state === 'off') { show('on', t('w.outages.untilOff'), fmtLeft(next.from - now), t('w.outages.next', { from: next.fromLabel, to: next.toLabel })); return; }
-      if (next) { show('on', '', '—', t('w.outages.unknownFrom', { time: next.fromLabel })); return; }
+      if (next?.state === 'off') {
+        const when = { from: next.fromLabel, to: next.toLabel };
+        show('on', t('w.outages.untilOff'), fmtLeft(next.from - now), t(next.from >= data.dayEnd ? 'w.outages.nextTomorrow' : 'w.outages.next', when));
+        return;
+      }
+      // power is on now, but what comes next is unknown: neither a countdown nor the cut's colour
+      if (next) { show('nodata', '', '—', t('w.outages.unknownFrom', { time: next.fromLabel })); return; }
       // nothing planned in the known schedule; a tomorrow without cuts may still be a placeholder, so say only what it says
       show('on', t('w.outages.noneToday'), '✓', t(data.tomorrow ? 'w.outages.noneTomorrow' : 'w.outages.tomorrowUnknown'));
     };

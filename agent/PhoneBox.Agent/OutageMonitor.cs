@@ -6,9 +6,12 @@ namespace PhoneBox.Agent;
 
 public sealed record OutageRegionInfo(string Id, string NameUa, string NameRu, string NameEn, bool Emergency);
 
-/// <summary>What the Power outages widget gets for its region and queue: today's and tomorrow's runs, Kyiv day bounds and how fresh it all is.</summary>
+/// <summary>
+/// What the Power outages widget gets for its region and queue: today's and tomorrow's runs, the end of today in Kyiv
+/// (to tell tomorrow's windows apart) and how fresh it all is.
+/// </summary>
 public sealed record OutageView(long Updated, string? Error, OutageRegionInfo? Region, bool Stale, bool Found,
-    long DayStart, long DayEnd, bool Tomorrow, bool TomorrowOff, IReadOnlyList<OutageRun> Runs);
+    long DayEnd, bool Tomorrow, IReadOnlyList<OutageRun> Runs);
 
 /// <summary>
 /// Planned power outage schedules for Ukraine (svitlo.live), for the Power outages widget. svitlo.live runs two servers:
@@ -81,13 +84,27 @@ public sealed partial class OutageMonitor(ConfigStore config, ILogger<OutageMoni
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            var msg = ex is OperationCanceledException ? "no answer in 20 s" : ex is FormatException ? "not a schedule" : ex.Message;
+            var msg = Describe(ex);
             lock (_gate) src.Error = msg; // the last good schedule stays
             log.LogInformation("outages {Host}: {Msg}", new Uri(src.Url).Host, msg);
         }
     }
 
     /// <summary>A region is current when some queue has a known slot today; a day of unknown slots is a placeholder.</summary>
+    [GeneratedRegex(@"\bHTTP (\d{3})\b")]
+    private static partial Regex HttpStatus();
+
+    /// <summary>The fetch shares its HTTP code with the news feeds, whose messages talk about feeds: say it in the schedule's words.</summary>
+    private static string Describe(Exception ex) => ex switch
+    {
+        OperationCanceledException => "no answer in 20 s",
+        FormatException => "not a schedule",
+        HttpRequestException { StatusCode: { } code } => $"server answered {(int)code}",
+        HttpRequestException h when HttpStatus().Match(h.Message) is { Success: true } m => $"server answered {m.Groups[1].Value}",
+        HttpRequestException h when h.Message.Contains("larger than", StringComparison.Ordinal) => "answer too large",
+        _ => "server not reachable",
+    };
+
     private static bool Current(OutageData d, OutageRegion r) =>
         r.Queues.Values.Any(days => days.TryGetValue(d.DateToday, out var slots) && slots.Any(c => c is 1 or 2));
 
@@ -117,25 +134,24 @@ public sealed partial class OutageMonitor(ConfigStore config, ILogger<OutageMoni
         // the preferred server's region when it is current, else any current one, else the preferred one as it is
         var pick = candidates.Where(c => Current(c.Data, c.Region)).Cast<(OutageData, OutageRegion, long)?>().FirstOrDefault()
             ?? candidates.Cast<(OutageData, OutageRegion, long)?>().FirstOrDefault();
-        var none = new OutageView(pick?.Item3 ?? 0, error, null, false, false, 0, 0, false, false, []);
+        var none = new OutageView(pick?.Item3 ?? 0, error, null, false, false, 0, false, []);
         if (pick is not { } chosen) return none;
         var (data, r, updated) = chosen;
         if (!DateOnly.TryParseExact(data.DateToday, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var today)) return none;
         var info = new OutageRegionInfo(r.Id, r.NameUa, r.NameRu, r.NameEn, r.Emergency);
-        var (dayStart, dayEnd) = OutageSource.Day(today);
+        var dayEnd = OutageSource.Day(today).End;
         // a region whose newest day isn't the source's today has an old schedule: nothing in it can be trusted for now
         var stale = !Current(data, r);
         var id = NormalizeQueue(queue);
         var found = id is not null && r.Queues.ContainsKey(id);
         // a queue that exists but has no day for today is as untrustworthy as a stale region, not a typo
         if (stale || !found || !r.Queues[id!].TryGetValue(data.DateToday, out var todaySlots))
-            return none with { Region = info, Stale = stale || found, DayStart = dayStart, DayEnd = dayEnd };
+            return none with { Region = info, Stale = stale || found, DayEnd = dayEnd };
         var q = r.Queues[id!];
         // a tomorrow with no known slot is a placeholder, not a published schedule
         var tomorrow = q.TryGetValue(data.DateTomorrow, out var t) && t.Any(c => c is 1 or 2) ? t : null;
         var days = new List<(DateOnly, int[])> { (today, todaySlots) };
         if (tomorrow is not null) days.Add((today.AddDays(1), tomorrow));
-        return new OutageView(updated, error, info, false, true, dayStart, dayEnd, tomorrow is not null,
-            tomorrow?.Contains(2) == true, OutageSource.Runs(days));
+        return new OutageView(updated, error, info, false, true, dayEnd, tomorrow is not null, OutageSource.Runs(days));
     }
 }

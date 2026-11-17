@@ -252,9 +252,7 @@ public sealed class OutageMonitorTests : IDisposable
         Assert.Equal("Kyiv Region", v.Region!.NameEn);
         Assert.Equal("Київська область", v.Region.NameUa);
         Assert.True(v.Tomorrow);
-        Assert.True(v.TomorrowOff);
         var day = OutageSource.Day(new DateOnly(2026, 11, 17));
-        Assert.Equal(day.Start, v.DayStart);
         Assert.Equal(day.End, v.DayEnd);
         Assert.Equal(["on", "off", "on", "off", "on"], v.Runs.Select(r => r.State).ToArray());
         Assert.Equal(day.Start, v.Runs[0].From);
@@ -305,7 +303,7 @@ public sealed class OutageMonitorTests : IDisposable
         await m.TickAsync(CancellationToken.None);
         var v = m.View("chernivetska-oblast", "5");
         Assert.True(v.Found);
-        Assert.NotNull(v.Error);
+        Assert.Equal("server answered 502", v.Error);
         Assert.Equal(_now, v.Updated);
         Assert.Equal(0, m.View("odeska-oblast", "3.1").Updated); // only the main server has Odesa, and it never answered
     }
@@ -381,7 +379,6 @@ public sealed class OutageMonitorTests : IDisposable
         using var m = await Loaded();
         var v = m.View("odeska-oblast", "3.1");
         Assert.False(v.Tomorrow);
-        Assert.False(v.TomorrowOff);
         Assert.True(v.Region!.Emergency);
         Assert.Equal(["on"], v.Runs.Select(r => r.State).ToArray()); // the unknown day is left out
     }
@@ -399,7 +396,7 @@ public sealed class OutageMonitorTests : IDisposable
         await m.TickAsync(CancellationToken.None);
         var v = m.View("kiivska-oblast", "3.1");
         Assert.Equal(4, handler.Seen.Count);
-        Assert.NotNull(v.Error);
+        Assert.Equal("server answered 500", v.Error);
         Assert.Equal(updated, v.Updated);
         Assert.NotEmpty(v.Runs);
     }
@@ -413,6 +410,27 @@ public sealed class OutageMonitorTests : IDisposable
         var v = m.View("kiivska-oblast", "3.1");
         Assert.Equal("not a schedule", v.Error);
         Assert.Equal(0, v.Updated);
+    }
+
+    [Fact]
+    public async Task ThePhoneGetsOnlyTheFieldsItUses()
+    {
+        using var m = await Loaded();
+        var json = JsonSerializer.Serialize(m.View("kiivska-oblast", "3.1"), new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal(["dayEnd", "error", "found", "region", "runs", "stale", "tomorrow", "updated"],
+            doc.RootElement.EnumerateObject().Select(p => p.Name).Order().ToArray());
+    }
+
+    [Fact]
+    public async Task AnOversizedAnswerIsReportedAsTheSchedulesOwnError()
+    {
+        var huge = new string(' ', FeedHttp.MaxBytes + 1);
+        using var m = Monitor(Config(), new FeedHttpTests.Fake(_ => Json(huge)));
+        await m.TickAsync(CancellationToken.None);
+        var error = m.View("kiivska-oblast", "3.1").Error;
+        Assert.NotNull(error);
+        Assert.DoesNotContain("feed", error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
