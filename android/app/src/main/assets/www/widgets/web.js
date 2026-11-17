@@ -106,6 +106,79 @@ W.feeds = {
   },
 };
 
+// Planned power outages in Ukraine for one region and queue. The agent fetches the schedule (at most every 15 minutes)
+// and sends this queue's runs with Kyiv-time labels; the countdown runs here from those absolute times.
+const OUTAGE_FRESH_MS = 60 * 60_000;
+const fmtLeft = (ms) => {
+  const s = Math.max(0, Math.floor(ms / 1000)), hrs = Math.floor(s / 3600), mins = Math.floor((s % 3600) / 60);
+  return hrs ? `${hrs}:${String(mins).padStart(2, '0')}` : `${String(mins).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+};
+W.outages = {
+  needs: ['tick'],
+  create(box, { o }) {
+    const region = String(o.region || 'kiivska-oblast'), queue = String(o.queue || '1.1').trim();
+    const title = h('div', 'ou-t', o.title || queue), warn = h('span', 'ou-warn', '⚠');
+    const label = h('div', 'ou-l', ''), value = h('div', 'ou-v', '—'), note = h('div', 'ou-n', t('w.loading'));
+    const strip = h('div', 'ou-strip');
+    warn.hidden = true;
+    box.append(h('div', 'ou-h', title, warn), label, value, note, strip);
+    let data = null, lastOk = 0, stripKey = '';
+    const load = every(60_000, async () => {
+      try {
+        data = await api(`/outages?region=${encodeURIComponent(region)}&queue=${encodeURIComponent(queue)}`, 'GET', 5000);
+        lastOk = Date.now();
+      } catch (_) { if (!data) note.textContent = t('w.offline'); return false; }
+    });
+    const show = (state, l, v, n) => {
+      box.classList.toggle('on', state === 'on');
+      box.classList.toggle('off', state === 'off');
+      box.classList.toggle('nodata', state === 'nodata');
+      label.textContent = l; value.textContent = v; note.textContent = n;
+    };
+    const drawStrip = (now) => {
+      // the day's runs as a bar; redrawn when the data changes, the marker moves every minute
+      const key = JSON.stringify([data.dayStart, data.runs.length, data.updated, Math.floor(now / 60_000)]);
+      if (key === stripKey) return;
+      stripKey = key;
+      const span = data.dayEnd - data.dayStart;
+      if (!(span > 0) || !data.runs.length) { strip.replaceChildren(); return; }
+      const segs = data.runs.filter((r) => r.to > data.dayStart && r.from < data.dayEnd).map((r) => {
+        const seg = h('i', 'ou-seg ' + r.state);
+        const from = Math.max(r.from, data.dayStart), to = Math.min(r.to, data.dayEnd);
+        seg.style.left = ((from - data.dayStart) / span * 100) + '%';
+        seg.style.width = ((to - from) / span * 100) + '%';
+        return seg;
+      });
+      const mark = h('i', 'ou-now');
+      mark.style.left = (Math.min(1, Math.max(0, (now - data.dayStart) / span)) * 100) + '%';
+      strip.replaceChildren(...segs, mark);
+    };
+    const render = () => {
+      if (!data) return;
+      const now = Date.now();
+      const r = data.region;
+      const name = r ? (window.PhoneBoxI18n?.getLang?.() === 'ru' ? r.nameRu : r.nameEn) || r.nameUa : '';
+      title.textContent = o.title || (name ? `${name} · ${queue}` : queue);
+      warn.hidden = !(r?.emergency || data.error);
+      warn.title = r?.emergency ? t('w.outages.emergency') : data.error || '';
+      strip.hidden = box.clientHeight < 110;
+      if (!r) { show('nodata', '', '—', t('w.outages.noData')); return; }
+      if (data.stale) { show('nodata', '', '—', t('w.outages.stale')); return; }
+      if (!data.found) { show('nodata', '', '—', t('w.outages.notFound', { queue })); return; }
+      if (!(now - data.updated <= OUTAGE_FRESH_MS && now - lastOk <= OUTAGE_FRESH_MS)) { show('nodata', '', '—', t('w.outages.noData')); return; }
+      if (!strip.hidden) drawStrip(now);
+      const cur = data.runs.find((x) => x.from <= now && now < x.to);
+      if (!cur || cur.state === 'unknown') { show('nodata', '', '—', t('w.outages.noData')); return; }
+      if (cur.state === 'off') { show('off', t('w.outages.untilOn'), fmtLeft(cur.to - now), t('w.outages.onAt', { time: cur.toLabel })); return; }
+      const next = data.runs.find((x) => x.from >= cur.to && x.state === 'off');
+      if (next) { show('on', t('w.outages.untilOff'), fmtLeft(next.from - now), t('w.outages.next', { from: next.fromLabel, to: next.toLabel })); return; }
+      // nothing planned in the known schedule; a tomorrow without cuts may still be a placeholder, so say only what it says
+      show('on', t('w.outages.noneToday'), '✓', t(data.tomorrow ? 'w.outages.noneTomorrow' : 'w.outages.tomorrowUnknown'));
+    };
+    return { update() { load(); render(); } };
+  },
+};
+
 W.exchange = {
   needs: ['tick'],
   create(box, { o }) {

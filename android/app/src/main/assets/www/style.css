@@ -1230,3 +1230,21 @@ body.controls-top .ap-foot { order: -1; margin-bottom: 4px; }
 .note-card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px; width: min(92vw, 560px); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 10px 40px rgba(0, 0, 0, .5); }
 .note-ta { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; line-height: 1.4; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); resize: vertical; }
 .note-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* Power outages (Ukraine): a big countdown to the next cut, or to power coming back */
+.w-outages { padding: 7px 10px; display: flex; flex-direction: column; justify-content: center; gap: 1px; --c: #facc15; }
+.ou-h { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ou-t { flex: 1; min-width: 0; font-size: clamp(9px, 9cqh, 12px); color: var(--muted); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ou-warn { color: #f97316; font-size: clamp(9px, 9cqh, 12px); }
+.ou-l { font-size: clamp(9px, 9cqh, 12px); color: var(--dim); text-transform: uppercase; letter-spacing: .06em; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ou-v { font-size: min(30cqh, 26cqw); font-weight: 300; line-height: 1.05; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ou-n { font-size: clamp(9px, 9cqh, 12px); color: var(--dim); line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.w-outages.on .ou-v { color: #facc15; }
+.w-outages.off .ou-v { color: #f87171; }
+.w-outages.nodata .ou-v { color: var(--dim); }
+.ou-strip { position: relative; height: 4px; margin-top: 3px; border-radius: 2px; background: rgba(255, 255, 255, .08); overflow: hidden; flex: none; }
+.ou-seg { position: absolute; top: 0; bottom: 0; }
+.ou-seg.on { background: rgba(250, 204, 21, .55); }
+.ou-seg.off { background: rgba(248, 113, 113, .8); }
+.ou-seg.unknown { background: rgba(255, 255, 255, .15); }
+.ou-now { position: absolute; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: #fff; }

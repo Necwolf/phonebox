@@ -465,6 +465,29 @@
     return { ok: true };
   }
 
+  let outagesT0 = 0;
+  function demoOutages(region, queue) {
+    const t = now();
+    if (!outagesT0) outagesT0 = t;
+    let frozen = false;
+    try { frozen = localStorage.getItem('pb-demo-outages-frozen') === '1'; } catch (_) { /* storage blocked: live data */ }
+    const kyiv = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    const label = (ms, end) => { const s = kyiv.format(ms); return end && s === '00:00' ? '24:00' : s; };
+    // Kyiv midnight before t0: step back from t0 by its Kyiv wall-clock time
+    const [hh, mm] = kyiv.format(outagesT0).split(':').map(Number);
+    const dayStart = outagesT0 - ((hh * 60 + mm) * 60_000) - (outagesT0 % 60_000), dayEnd = dayStart + 86_400_000;
+    const names = { 'kiivska-oblast': ['Київська область', 'Киевская область', 'Kyiv Region'], 'lvivska-oblast': ['Львівська область', 'Львовская область', 'Lviv Region'],
+      'dnipropetrovska-oblast': ['Дніпропетровська область', 'Днепропетровская область', 'Dnipropetrovsk Region'] };
+    const n = names[region] || names['kiivska-oblast'];
+    const base = { updated: frozen ? outagesT0 : t, error: null, dayStart, dayEnd, tomorrow: false, tomorrowOff: false, runs: [],
+      region: { id: region, nameUa: n[0], nameRu: n[1], nameEn: n[2], emergency: region === 'dnipropetrovska-oblast' }, stale: false, found: false };
+    if (region === 'lvivska-oblast') return { ...base, stale: true };
+    if (!/^\d{1,2}\.\d$/.test(queue.trim()) || queue.trim() === '9.9') return base;
+    const offFrom = outagesT0 + 40 * 60_000, offTo = offFrom + 3 * 3_600_000;
+    const run = (from, to, state) => ({ from, to, state, fromLabel: label(from, false), toLabel: label(to, true) });
+    return { ...base, found: true, tomorrow: true, runs: [run(dayStart, offFrom, 'on'), run(offFrom, offTo, 'off'), run(offTo, dayEnd + 86_400_000, 'on')] };
+  }
+
   async function handle(method, path, q, body, headers) {
     if (path === '/api/controls/obs') return json(deckObsState());
     if (path.startsWith('/api/controls/obs/') && method === 'POST') {
@@ -592,6 +615,8 @@
         78 - i * 0.7 + (i < 8 ? kick * 22 : 0) + 14 * Math.sin(s * (2.1 + i * 0.37) + i) + 6 * Math.sin(s * 9.7 + i * 1.3))))) : null;
       return json({ shown, active: shown, fps: 30, b });
     }
+    // power outages (Ukraine): a made-up schedule relative to the first request, power off 40 minutes later for 3 hours
+    if (path === '/api/outages') return json(demoOutages(q.get('region') || '', q.get('queue') || ''));
     if (path === '/api/feeds') { const c = await config(); return json({ items: DEMO_FEEDS(), updated: now(), errors: [], canOpen: feedsCanOpen(c) }); }
     if (path === '/api/feeds/open' && method === 'POST') {
       if (!feedsCanOpen(await config())) return json({ error: 'Opening articles is off: turn on "Open articles on the PC" in the News feeds widget\'s settings' }, 400);
