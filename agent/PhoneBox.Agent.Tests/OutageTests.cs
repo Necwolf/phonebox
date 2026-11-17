@@ -144,6 +144,7 @@ public sealed class OutageMonitorTests : IDisposable
                         ["2026-11-17"] = OutageSourceTests.Slots(i => i is >= 12 and < 20 ? 2 : 1),
                         ["2026-11-18"] = OutageSourceTests.Slots(i => i < 4 ? 2 : 1),
                     },
+                    ["4.1"] = new Dictionary<string, object> { ["2026-10-17"] = OutageSourceTests.Slots(_ => 1) },
                 },
             },
             new
@@ -251,9 +252,29 @@ public sealed class OutageMonitorTests : IDisposable
     [InlineData("60.1", "60.1")]
     [InlineData("abc", null)]
     [InlineData("3.1; rm", null)]
+    [InlineData("٣.١", null)] // non-ASCII digits match \d but aren't queue ids
     [InlineData("", null)]
     [InlineData(null, null)]
     public void QueueIsNormalizedAndValidated(string? given, string? expected) => Assert.Equal(expected, OutageMonitor.NormalizeQueue(given));
+
+    [Fact]
+    public async Task QueueWithoutTodaysScheduleIsStaleNotMissing()
+    {
+        using var m = await Loaded();
+        var v = m.View("kiivska-oblast", "4.1");
+        Assert.True(v.Stale);
+        Assert.Empty(v.Runs);
+        Assert.False(m.View("kiivska-oblast", "3.1").Stale); // the rest of the region is current
+    }
+
+    [Fact]
+    public async Task NonAsciiDigitsAreNotFoundRatherThanAnError()
+    {
+        using var m = await Loaded();
+        var v = m.View("kiivska-oblast", "٣.١");
+        Assert.False(v.Found);
+        Assert.Empty(v.Runs);
+    }
 
     [Fact]
     public async Task LooselyTypedQueueFindsTheSchedule()

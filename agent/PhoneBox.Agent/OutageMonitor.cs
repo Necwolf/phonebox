@@ -72,7 +72,8 @@ public sealed partial class OutageMonitor(ConfigStore config, ILogger<OutageMoni
         }
     }
 
-    [GeneratedRegex(@"^\s*0*(\d{1,2})[.,](\d)\s*$")]
+    // [0-9], not \d: \d also matches other scripts' digits, which int.Parse refuses
+    [GeneratedRegex(@"^\s*0*([0-9]{1,2})[.,]([0-9])\s*$")]
     private static partial Regex QueuePattern();
 
     /// <summary>"3.1", " 3,1 ", "03.1" → "3.1"; anything that isn't a queue id → null.</summary>
@@ -91,8 +92,11 @@ public sealed partial class OutageMonitor(ConfigStore config, ILogger<OutageMoni
         // a region whose newest day isn't the source's today has an old schedule: nothing in it can be trusted for now
         var stale = !r.Queues.Values.Any(days => days.ContainsKey(data.DateToday));
         var id = NormalizeQueue(queue);
-        if (stale || id is null || !r.Queues.TryGetValue(id, out var q) || !q.TryGetValue(data.DateToday, out var todaySlots))
-            return none with { Region = info, Stale = stale, DayStart = dayStart, DayEnd = dayEnd };
+        var found = id is not null && r.Queues.ContainsKey(id);
+        // a queue that exists but has no day for today is as untrustworthy as a stale region, not a typo
+        if (stale || !found || !r.Queues[id!].TryGetValue(data.DateToday, out var todaySlots))
+            return none with { Region = info, Stale = stale || found, DayStart = dayStart, DayEnd = dayEnd };
+        var q = r.Queues[id!];
         // a tomorrow with no known slot is a placeholder, not a published schedule
         var tomorrow = q.TryGetValue(data.DateTomorrow, out var t) && t.Any(c => c is 1 or 2) ? t : null;
         var days = new List<(DateOnly, int[])> { (today, todaySlots) };

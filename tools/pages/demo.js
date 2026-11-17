@@ -485,7 +485,14 @@
     if (!/^\d{1,2}\.\d$/.test(queue.trim()) || queue.trim() === '9.9') return base;
     const offFrom = outagesT0 + 40 * 60_000, offTo = offFrom + 3 * 3_600_000;
     const run = (from, to, state) => ({ from, to, state, fromLabel: label(from, false), toLabel: label(to, true) });
-    return { ...base, found: true, tomorrow: true, runs: [run(dayStart, offFrom, 'on'), run(offFrom, offTo, 'off'), run(offTo, dayEnd + 86_400_000, 'on')] };
+    const runs = {
+      // the cut runs into a part of the schedule nobody knows yet: no promise of power coming back
+      '2.1': [run(dayStart, offFrom, 'on'), run(offFrom, offTo, 'off')],
+      // a gap in the schedule before the next cut
+      '4.1': [run(dayStart, offFrom, 'on'), run(offFrom, offFrom + 3_600_000, 'unknown'), run(offFrom + 3_600_000, offTo, 'off'), run(offTo, dayEnd, 'on')],
+      '5.1': [run(dayStart, offFrom, 'on'), run(offFrom, dayEnd, 'unknown')],
+    }[queue.trim()] || [run(dayStart, offFrom, 'on'), run(offFrom, offTo, 'off'), run(offTo, dayEnd + 86_400_000, 'on')];
+    return { ...base, found: true, tomorrow: !['2.1', '5.1'].includes(queue.trim()), runs };
   }
 
   async function handle(method, path, q, body, headers) {
@@ -616,7 +623,11 @@
       return json({ shown, active: shown, fps: 30, b });
     }
     // power outages (Ukraine): a made-up schedule relative to the first request, power off 40 minutes later for 3 hours
-    if (path === '/api/outages') return json(demoOutages(q.get('region') || '', q.get('queue') || ''));
+    if (path === '/api/outages') {
+      let offline = false;
+      try { offline = localStorage.getItem('pb-demo-outages-offline') === '1'; } catch (_) { /* storage blocked */ }
+      return offline ? json({ error: 'agent unreachable' }, 503) : json(demoOutages(q.get('region') || '', q.get('queue') || ''));
+    }
     if (path === '/api/feeds') { const c = await config(); return json({ items: DEMO_FEEDS(), updated: now(), errors: [], canOpen: feedsCanOpen(c) }); }
     if (path === '/api/feeds/open' && method === 'POST') {
       if (!feedsCanOpen(await config())) return json({ error: 'Opening articles is off: turn on "Open articles on the PC" in the News feeds widget\'s settings' }, 400);

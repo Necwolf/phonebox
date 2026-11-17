@@ -1243,6 +1243,7 @@ body.controls-top .ap-foot { order: -1; margin-bottom: 4px; }
 .w-outages.off .ou-v { color: #f87171; }
 .w-outages.nodata .ou-v { color: var(--dim); }
 .ou-strip { position: relative; height: 4px; margin-top: 3px; border-radius: 2px; background: rgba(255, 255, 255, .08); overflow: hidden; flex: none; }
+.w-outages.nodata .ou-strip { opacity: .35; }
 .ou-seg { position: absolute; top: 0; bottom: 0; }
 .ou-seg.on { background: rgba(250, 204, 21, .55); }
 .ou-seg.off { background: rgba(248, 113, 113, .8); }

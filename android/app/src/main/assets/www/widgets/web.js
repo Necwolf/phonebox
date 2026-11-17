@@ -122,12 +122,13 @@ W.outages = {
     const strip = h('div', 'ou-strip');
     warn.hidden = true;
     box.append(h('div', 'ou-h', title, warn), label, value, note, strip);
-    let data = null, lastOk = 0, stripKey = '';
+    let data = null, lastOk = 0, stripKey = '', offline = false;
     const load = every(60_000, async () => {
       try {
         data = await api(`/outages?region=${encodeURIComponent(region)}&queue=${encodeURIComponent(queue)}`, 'GET', 5000);
         lastOk = Date.now();
-      } catch (_) { if (!data) note.textContent = t('w.offline'); return false; }
+        offline = false;
+      } catch (_) { offline = true; if (!data) note.textContent = t('w.offline'); return false; }
     });
     const show = (state, l, v, n) => {
       box.classList.toggle('on', state === 'on');
@@ -159,8 +160,9 @@ W.outages = {
       const r = data.region;
       const name = r ? (window.PhoneBoxI18n?.getLang?.() === 'ru' ? r.nameRu : r.nameEn) || r.nameUa : '';
       title.textContent = o.title || (name ? `${name} · ${queue}` : queue);
-      warn.hidden = !(r?.emergency || data.error);
-      warn.title = r?.emergency ? t('w.outages.emergency') : data.error || '';
+      // the last schedule keeps counting for up to an hour without the agent, but not silently
+      warn.hidden = !(r?.emergency || offline || data.error);
+      warn.title = r?.emergency ? t('w.outages.emergency') : offline ? t('w.offline') : data.error || '';
       strip.hidden = box.clientHeight < 110;
       if (!r) { show('nodata', '', '—', t('w.outages.noData')); return; }
       if (data.stale) { show('nodata', '', '—', t('w.outages.stale')); return; }
@@ -169,9 +171,17 @@ W.outages = {
       if (!strip.hidden) drawStrip(now);
       const cur = data.runs.find((x) => x.from <= now && now < x.to);
       if (!cur || cur.state === 'unknown') { show('nodata', '', '—', t('w.outages.noData')); return; }
-      if (cur.state === 'off') { show('off', t('w.outages.untilOn'), fmtLeft(cur.to - now), t('w.outages.onAt', { time: cur.toLabel })); return; }
-      const next = data.runs.find((x) => x.from >= cur.to && x.state === 'off');
-      if (next) { show('on', t('w.outages.untilOff'), fmtLeft(next.from - now), t('w.outages.next', { from: next.fromLabel, to: next.toLabel })); return; }
+      if (cur.state === 'off') {
+        // power coming back is only promised when the schedule says so for the next stretch
+        const after = data.runs.find((x) => x.from === cur.to);
+        if (after?.state === 'on') show('off', t('w.outages.untilOn'), fmtLeft(cur.to - now), t('w.outages.onAt', { time: cur.toLabel }));
+        else show('off', '', '—', t('w.outages.offUnknown'));
+        return;
+      }
+      // the first stretch that isn't "on" decides: a cut to count down to, or a gap nobody knows about
+      const next = data.runs.slice(data.runs.indexOf(cur) + 1).find((x) => x.state !== 'on');
+      if (next?.state === 'off') { show('on', t('w.outages.untilOff'), fmtLeft(next.from - now), t('w.outages.next', { from: next.fromLabel, to: next.toLabel })); return; }
+      if (next) { show('on', '', '—', t('w.outages.unknownFrom', { time: next.fromLabel })); return; }
       // nothing planned in the known schedule; a tomorrow without cuts may still be a placeholder, so say only what it says
       show('on', t('w.outages.noneToday'), '✓', t(data.tomorrow ? 'w.outages.noneTomorrow' : 'w.outages.tomorrowUnknown'));
     };
