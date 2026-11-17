@@ -75,6 +75,7 @@ AddMonitor<QuotaMonitor>(builder.Services);
 AddMonitor<ProcessMonitor>(builder.Services);
 AddMonitor<SessionMonitor>(builder.Services);
 AddMonitor<FeedMonitor>(builder.Services);
+AddMonitor<OutageMonitor>(builder.Services);
 builder.Services.AddSingleton<PhotoFrame>();
 builder.Services.AddSingleton<CameraFeeds>();
 AddMonitor<GitHubMonitor>(builder.Services);
@@ -483,6 +484,8 @@ app.MapGet("/api/feeds", (FeedMonitor feeds) =>
     var s = feeds.Snapshot();
     return Results.Json(new { s.Items, s.Updated, s.Errors, canOpen = feeds.OpenAllowed() });
 });
+// Power outages widget: one region and queue of the Ukrainian outage schedule the agent keeps (see OutageMonitor).
+app.MapGet("/api/outages", (string? region, string? queue, OutageMonitor outages) => Results.Json(outages.View(region, queue)));
 // Photo frame: ids of the photos in the chosen folder, then one (scaled-down) photo at a time by id.
 app.MapGet("/api/photos", (PhotoFrame photos) =>
 {

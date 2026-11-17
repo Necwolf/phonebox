@@ -196,6 +196,7 @@ public class LanTests
     [InlineData("/api/apps/open", true)]
     [InlineData("/api/feeds", true)]
     [InlineData("/api/feeds/open", true)]
+    [InlineData("/api/outages", true)]
     [InlineData("/api/photos", true)]
     [InlineData("/api/photos/0123456789abcdef", true)]
     [InlineData("/api/push/temperature", true)]

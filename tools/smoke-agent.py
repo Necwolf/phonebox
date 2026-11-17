@@ -24,6 +24,7 @@ with tempfile.TemporaryDirectory(prefix='phonebox-smoke-') as work:
     assert time.monotonic()<deadline,'API readiness deadline exceeded'
     time.sleep(.3)
    assert get('/api/info')['version']==args.version,'Artifact version differs'
+   outages=get('/api/outages?region=kiivska-oblast&queue=3.1');assert {'updated','runs','found'}<=outages.keys(),'Outages endpoint missing'
    catalog=get('/api/catalog');assert {'stack','codexbar'}<={w['type'] for w in catalog['widgets']}
    assert b'W.stack' in urllib.request.urlopen(base+'/panel/widgets/stack.js',timeout=3).read(),'Stack module missing from artifact'
    try:urllib.request.urlopen(urllib.request.Request(base+'/api/settings',headers={'Origin':'https://foreign.example'}),timeout=3)
