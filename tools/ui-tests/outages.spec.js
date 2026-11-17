@@ -22,7 +22,7 @@ async function open(page, options, { frozen = false, w = 2, h = 2 } = {}) {
 
 test('counts down to the next power cut', async ({ page }) => {
   const w = await open(page, { region: 'kiivska-oblast', queue: '3.1' });
-  await expect(w.locator('.ou-l')).toHaveText('Until power off');
+  await expect(w.locator('.ou-l')).toHaveText('Off in');
   await expect(w.locator('.ou-v')).toHaveText(/^(39|40):\d\d$/);
   await expect(w.locator('.ou-n')).toHaveText(/^Off \d\d:\d\d–\d\d:\d\d$/);
   await expect(w).toHaveClass(/\bon\b/);
@@ -30,9 +30,9 @@ test('counts down to the next power cut', async ({ page }) => {
 
 test('switches to the power-on countdown inside the window', async ({ page }) => {
   const w = await open(page, { region: 'kiivska-oblast', queue: '3.1' });
-  await expect(w.locator('.ou-l')).toHaveText('Until power off');
+  await expect(w.locator('.ou-l')).toHaveText('Off in');
   await page.clock.fastForward('00:41:00');
-  await expect(w.locator('.ou-l')).toHaveText('Until power on');
+  await expect(w.locator('.ou-l')).toHaveText('On in');
   await expect(w.locator('.ou-v')).toHaveText(/^2:5\d$/);
   await expect(w.locator('.ou-n')).toHaveText(/^Power on at \d\d:\d\d$/);
   await expect(w).toHaveClass(/\boff\b/);
@@ -53,7 +53,7 @@ test('an unknown queue shows no countdown', async ({ page }) => {
 
 test('old data stops the countdown', async ({ page }) => {
   const w = await open(page, { region: 'kiivska-oblast', queue: '3.1' }, { frozen: true });
-  await expect(w.locator('.ou-l')).toHaveText('Until power off');
+  await expect(w.locator('.ou-l')).toHaveText('Off in');
   await page.clock.fastForward('01:01:00');
   await expect(w.locator('.ou-n')).toHaveText('No fresh data');
   await expect(w.locator('.ou-v')).toHaveText('—');
@@ -86,7 +86,7 @@ test('fits a 2 × 2 slot', async ({ page }) => {
 
 test('a cut followed by an unknown schedule does not promise power at midnight', async ({ page }) => {
   const w = await open(page, { region: 'kiivska-oblast', queue: '2.1' });
-  await expect(w.locator('.ou-l')).toHaveText('Until power off');
+  await expect(w.locator('.ou-l')).toHaveText('Off in');
   await page.clock.fastForward('00:41:00');
   await expect(w.locator('.ou-n')).toHaveText('Off · return time unknown');
   await expect(w.locator('.ou-v')).toHaveText('—');
@@ -107,31 +107,70 @@ test('an unknown rest of the day is not "no outages today"', async ({ page }) =>
 
 test('losing the agent shows a warning while the last schedule still counts down', async ({ page }) => {
   const w = await open(page, { region: 'kiivska-oblast', queue: '3.1' });
-  await expect(w.locator('.ou-l')).toHaveText('Until power off');
+  await expect(w.locator('.ou-l')).toHaveText('Off in');
   await expect(w.locator('.ou-warn')).toBeHidden();
   await page.evaluate(() => localStorage.setItem('pb-demo-outages-offline', '1'));
   await page.clock.fastForward('00:01:05');
   await expect(w.locator('.ou-warn')).toBeVisible();
-  await expect(w.locator('.ou-l')).toHaveText('Until power off');
+  await expect(w.locator('.ou-l')).toHaveText('Off in');
 });
 
-test('the day strip dims when the data is no longer fresh', async ({ page }) => {
-  await page.setViewportSize({ width: 780, height: 360 });
-  const w = await open(page, { region: 'kiivska-oblast', queue: '3.1' }, { frozen: true, h: 3, w: 4 });
-  await expect(w.locator('.ou-strip .ou-seg').first()).toBeAttached();
-  const opacity = () => w.locator('.ou-strip').evaluate((e) => Number(getComputedStyle(e).opacity));
-  expect(await opacity()).toBe(1);
+test('the schedule chart is drawn behind the text, also on a 2 × 2 tile', async ({ page }) => {
+  const w = await open(page, { region: 'kiivska-oblast', queue: '3.1' });
+  await expect(w.locator('.ou-v')).toHaveText(/\d/);
+  const chart = w.locator('canvas.ou-chart');
+  await expect(chart).toBeVisible();
+  const painted = () => chart.evaluate((c) => {
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i]) n++;
+    return n;
+  });
+  await expect.poll(painted).toBeGreaterThan(0);
+  const [box, c] = [await w.boundingBox(), await chart.boundingBox()];
+  expect(c.height).toBeGreaterThan(box.height * 0.3);
+  expect(c.y + c.height).toBeGreaterThan(box.y + box.height - 2); // anchored to the bottom like a metric tile
+});
+
+test('the chart looks ahead, so a cut after midnight is on it', async ({ page }) => {
+  // 23:30 in Kyiv: the mock's cut starts 40 minutes later, after midnight
+  await page.clock.setFixedTime(new Date('2026-11-17T21:30:00Z'));
+  const w = await open(page, { region: 'kiivska-oblast', queue: '3.1' });
+  await expect(w.locator('.ou-l')).toHaveText('Off in');
+  const red = () => w.locator('canvas.ou-chart').evaluate((c) => {
+    const d = c.getContext('2d').getImageData(0, 0, c.width, Math.max(1, Math.floor(c.height * 0.3))).data; // the top: only cuts reach it
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 3] && d[i] > 200 && d[i + 1] < 150) n++;
+    return n;
+  });
+  await expect.poll(red).toBeGreaterThan(0);
+});
+
+test('the labels fit a 2 × 2 tile', async ({ page }) => {
+  const w = await open(page, { region: 'kiivska-oblast', queue: '3.1' });
+  await expect(w.locator('.ou-l')).toHaveText('Off in');
+  expect(await w.locator('.ou-l').evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+});
+
+test('the chart dims when the data is no longer fresh', async ({ page }) => {
+  const w = await open(page, { region: 'kiivska-oblast', queue: '3.1' }, { frozen: true });
+  const opacity = () => w.locator('canvas.ou-chart').evaluate((e) => Number(getComputedStyle(e).opacity));
+  await expect(w.locator('.ou-l')).toHaveText('Off in');
+  const fresh = await opacity();
   await page.clock.fastForward('01:01:00');
   await expect(w.locator('.ou-n')).toHaveText('No fresh data');
-  expect(await opacity()).toBeLessThan(1);
+  expect(await opacity()).toBeLessThan(fresh);
 });
 
 test('until power off is red, until power on is green', async ({ page }) => {
   const w = await open(page, { region: 'kiivska-oblast', queue: '3.1' });
   const color = () => w.locator('.ou-v').evaluate((e) => getComputedStyle(e).color);
-  await expect(w.locator('.ou-l')).toHaveText('Until power off');
+  await expect(w.locator('.ou-l')).toHaveText('Off in');
+  const label = () => w.locator('.ou-l').evaluate((e) => getComputedStyle(e).color);
   expect(await color()).toBe('rgb(248, 113, 113)');
+  expect(await label()).toBe('rgb(248, 113, 113)');
   await page.clock.fastForward('00:41:00');
-  await expect(w.locator('.ou-l')).toHaveText('Until power on');
+  await expect(w.locator('.ou-l')).toHaveText('On in');
   expect(await color()).toBe('rgb(74, 222, 128)');
+  expect(await label()).toBe('rgb(74, 222, 128)');
 });
