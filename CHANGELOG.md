@@ -26,7 +26,7 @@
   version in #48 by [blx10](https://github.com/blx10).
 
 **Android app**
-- The app installs on Android 5.0 and 6.0 too (it was Android 7.0). Android 6 phones get everything, as their WebView
+- The app installs on Android 5.0 and 6.0 too (it was Android 7.0). On Android 6 widgets scale fully, as its WebView
   updates go up to version 106. On Android 5 the last WebView is 95, so the panel runs but widgets don't scale as well
   and the WebView notice stays. Not yet tried on an Android 5 or 6 device (#184,
   [phongnguyen2277](https://github.com/phongnguyen2277)).
