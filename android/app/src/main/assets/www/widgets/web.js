@@ -1,4 +1,4 @@
-import { $, API, PANEL_HEADERS, ago, api, h, haptic, safeFetch, store, t, tick, toast } from '../main.js';
+import { $, API, PANEL_HEADERS, ago, api, h, haptic, safeFetch, sizeCanvas, store, t, tick, toast } from '../main.js';
 import { W } from '../registry.js';
 import { cached, every, fmtNum, lines, pctSpan, sparkLine } from './helpers.js';
 
@@ -117,12 +117,13 @@ W.outages = {
   needs: ['tick'],
   create(box, { o }) {
     const region = String(o.region || 'kiivska-oblast'), queue = String(o.queue || '1.1').trim();
-    const title = h('div', 'ou-t', o.title || queue), warn = h('span', 'ou-warn', '⚠');
-    const label = h('div', 'ou-l', ''), value = h('div', 'ou-v', '—'), note = h('div', 'ou-n', t('w.loading'));
-    const strip = h('div', 'ou-strip');
+    // laid out like a Metric tile: coloured label, big value, a muted line, and the day's schedule as a chart behind
+    const chart = h('canvas', 'ou-chart'), warn = h('span', 'ou-warn', '⚠');
+    const label = h('div', 't-label ou-l', ''), value = h('b', 'ou-v', '—');
+    const note = h('div', 't-sub ou-n', t('w.loading')), title = h('div', 't-sub ou-t', o.title || queue);
     warn.hidden = true;
-    box.append(h('div', 'ou-h', title, warn), label, value, note, strip);
-    let data = null, lastOk = 0, stripKey = '', offline = false;
+    box.append(chart, warn, label, h('div', 't-val', value), note, title);
+    let data = null, lastOk = 0, chartKey = '', offline = false;
     const load = every(60_000, async () => {
       try {
         data = await api(`/outages?region=${encodeURIComponent(region)}&queue=${encodeURIComponent(queue)}`, 'GET', 5000);
@@ -136,23 +137,24 @@ W.outages = {
       box.classList.toggle('nodata', state === 'nodata');
       label.textContent = l; value.textContent = v; note.textContent = n;
     };
-    const drawStrip = (now) => {
-      // the day's runs as a bar; redrawn when the data changes, the marker moves every minute
-      const key = JSON.stringify([data.dayStart, data.runs.length, data.updated, Math.floor(now / 60_000)]);
-      if (key === stripKey) return;
-      stripKey = key;
-      const span = data.dayEnd - data.dayStart;
-      if (!(span > 0) || !data.runs.length) { strip.replaceChildren(); return; }
-      const segs = data.runs.filter((r) => r.to > data.dayStart && r.from < data.dayEnd).map((r) => {
-        const seg = h('i', 'ou-seg ' + r.state);
-        const from = Math.max(r.from, data.dayStart), to = Math.min(r.to, data.dayEnd);
-        seg.style.left = ((from - data.dayStart) / span * 100) + '%';
-        seg.style.width = ((to - from) / span * 100) + '%';
-        return seg;
-      });
-      const mark = h('i', 'ou-now');
-      mark.style.left = (Math.min(1, Math.max(0, (now - data.dayStart) / span)) * 100) + '%';
-      strip.replaceChildren(...segs, mark);
+    const drawChart = (now) => {
+      // the schedule from two hours ago to 22 hours ahead as steps, so the next cut is on it even past midnight:
+      // a cut fills the height, power on is a low band, unknown is left empty
+      const key = JSON.stringify([data.runs.length, data.updated, Math.floor(now / 60_000), chart.clientWidth, chart.clientHeight]);
+      if (key === chartKey || !chart.clientWidth) return;
+      chartKey = key;
+      const [g, w, hh, dpr] = sizeCanvas(chart);
+      g.clearRect(0, 0, w, hh);
+      const start = now - 2 * 3_600_000, end = start + 24 * 3_600_000;
+      const x = (ms) => Math.round((Math.min(end, Math.max(start, ms)) - start) / (end - start) * w);
+      for (const r of data.runs) {
+        if (r.to <= start || r.from >= end || r.state === 'unknown') continue;
+        const top = r.state === 'off' ? 0 : Math.round(hh * 0.78);
+        g.fillStyle = r.state === 'off' ? '#f87171' : '#4ade80';
+        g.fillRect(x(r.from), top, Math.max(1, x(r.to) - x(r.from)), hh - top);
+      }
+      g.fillStyle = '#fff';
+      g.fillRect(x(now) - Math.round(dpr), 0, Math.max(2, Math.round(2 * dpr)), hh);
     };
     const render = () => {
       if (!data) return;
@@ -163,12 +165,11 @@ W.outages = {
       // the last schedule keeps counting for up to an hour without the agent, but not silently
       warn.hidden = !(r?.emergency || offline || data.error);
       warn.title = r?.emergency ? t('w.outages.emergency') : offline ? t('w.offline') : data.error || '';
-      strip.hidden = box.clientHeight < 110;
       if (!r) { show('nodata', '', '—', t('w.outages.noData')); return; }
       if (data.stale) { show('nodata', '', '—', t('w.outages.stale')); return; }
       if (!data.found) { show('nodata', '', '—', t('w.outages.notFound', { queue })); return; }
       if (!(now - data.updated <= OUTAGE_FRESH_MS && now - lastOk <= OUTAGE_FRESH_MS)) { show('nodata', '', '—', t('w.outages.noData')); return; }
-      if (!strip.hidden) drawStrip(now);
+      drawChart(now);
       const cur = data.runs.find((x) => x.from <= now && now < x.to);
       if (!cur || cur.state === 'unknown') { show('nodata', '', '—', t('w.outages.noData')); return; }
       if (cur.state === 'off') {
