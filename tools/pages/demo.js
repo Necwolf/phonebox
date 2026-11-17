@@ -479,7 +479,7 @@
     const names = { 'kiivska-oblast': ['Київська область', 'Киевская область', 'Kyiv Region'], 'lvivska-oblast': ['Львівська область', 'Львовская область', 'Lviv Region'],
       'dnipropetrovska-oblast': ['Дніпропетровська область', 'Днепропетровская область', 'Dnipropetrovsk Region'] };
     const n = names[region] || names['kiivska-oblast'];
-    const base = { updated: frozen ? outagesT0 : t, error: null, dayStart, dayEnd, tomorrow: false, tomorrowOff: false, runs: [],
+    const base = { updated: frozen ? outagesT0 : t, error: null, dayEnd, tomorrow: false, runs: [],
       region: { id: region, nameUa: n[0], nameRu: n[1], nameEn: n[2], emergency: region === 'dnipropetrovska-oblast' }, stale: false, found: false };
     if (region === 'lvivska-oblast') return { ...base, stale: true };
     if (!/^\d{1,2}\.\d$/.test(queue.trim()) || queue.trim() === '9.9') return base;
@@ -491,6 +491,8 @@
       // a gap in the schedule before the next cut
       '4.1': [run(dayStart, offFrom, 'on'), run(offFrom, offFrom + 3_600_000, 'unknown'), run(offFrom + 3_600_000, offTo, 'off'), run(offTo, dayEnd, 'on')],
       '5.1': [run(dayStart, offFrom, 'on'), run(offFrom, dayEnd, 'unknown')],
+      // the next cut is after midnight
+      '6.1': [run(dayStart, dayEnd + 3_600_000, 'on'), run(dayEnd + 3_600_000, dayEnd + 3 * 3_600_000, 'off'), run(dayEnd + 3 * 3_600_000, dayEnd + 86_400_000, 'on')],
     }[queue.trim()] || [run(dayStart, offFrom, 'on'), run(offFrom, offTo, 'off'), run(offTo, dayEnd + 86_400_000, 'on')];
     return { ...base, found: true, tomorrow: !['2.1', '5.1'].includes(queue.trim()), runs };
   }

@@ -1241,6 +1241,6 @@ body.controls-top .ap-foot { order: -1; margin-bottom: 4px; }
 .w-outages .ou-v { color: var(--c); }
 .w-outages .ou-l:empty::before { content: '\00a0'; }
 .w-outages .t-val, .w-outages .t-sub { text-shadow: 0 1px 6px rgba(0, 0, 0, .9); }
-.w-outages .ou-n { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; position: relative; }
+.w-outages .ou-n { white-space: normal; line-height: 1.25; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; position: relative; }
 .w-outages .ou-t { position: relative; font-size: clamp(8.5px, 10cqh, 11px); }
 .ou-warn { position: absolute; top: clamp(5px, 9cqh, 10px); right: clamp(8px, 6cqw, 12px); color: #f97316; font-size: clamp(9px, 12cqh, 12px); }
