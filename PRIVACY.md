@@ -60,7 +60,7 @@ identifies your GitHub account to GitHub.
 | Hacker News widget (phone) | `hacker-news.firebaseio.com` | Nothing but the request |
 | Exchange rates widget (phone) | `api.frankfurter.dev` | The currencies you chose |
 | Crypto widget (phone) | `api.coingecko.com` | The coins and currency you chose |
-| Power outages widget | `dtek-api.svitlo-proxy.workers.dev` (svitlo.live), fetched by the agent at most every 15 minutes and only while an enabled page shows the widget; the phone never contacts it. Remove the widget to stop it | Nothing but the request: the region and queue are picked out on this computer |
+| Power outages widget | `dtek-api.svitlo-proxy.workers.dev` and `svitlo-proxy.svitlo-proxy.workers.dev` (svitlo.live's two servers), each fetched by the agent at most every 15 minutes and only while an enabled page shows the widget; the phone never contacts it. Remove the widget to stop it | Nothing but the request: the region and queue are picked out on this computer |
 | Internet radio | `*.api.radio-browser.info`, `opml.radiotime.com`, the station's own stream server and logo host | Station searches, the station you play and its logo request |
 | Spotify control | `accounts.spotify.com`, `api.spotify.com` | Your own Spotify app's client ID and the sign-in you approve; the token is saved in `config.json.spotify.json` next to your settings |
 | Spotify queue covers (phone) | `i.scdn.co`, while a Spotify queue widget shows covers. Turn off with the widget's **Show covers** option | The request for each cover image |

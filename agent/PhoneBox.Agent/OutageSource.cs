@@ -30,22 +30,36 @@ internal static class OutageSource
         throw new TimeZoneNotFoundException("Europe/Kyiv");
     }
 
-    /// <summary>Parses the source's answer: {"body": "&lt;JSON as a string&gt;"}. Anything else is a <see cref="FormatException"/>.</summary>
+    /// <summary>The legacy server spells some regions differently; both map to the main server's ids.</summary>
+    private static readonly Dictionary<string, string> Aliases = new(StringComparer.Ordinal)
+    {
+        ["harkivska-oblast"] = "kharkivska-oblast",
+        ["hmelnitska-oblast"] = "khmelnytska-oblast",
+        ["chernigivska-oblast"] = "chernihivska-oblast",
+        ["jitomirska-oblast"] = "zhytomyrska-oblast",
+    };
+
+    /// <summary>
+    /// Parses either server's answer: the main one wraps the schedule as a string in {"body": …}, the legacy one sends
+    /// it as it is. Anything else is a <see cref="FormatException"/>.
+    /// </summary>
     public static OutageData Parse(string raw)
     {
         try
         {
             using var outer = JsonDocument.Parse(raw);
-            if (outer.RootElement.ValueKind != JsonValueKind.Object || !outer.RootElement.TryGetProperty("body", out var body) || body.ValueKind != JsonValueKind.String)
-                throw new FormatException("no body");
-            using var doc = JsonDocument.Parse(body.GetString()!);
-            var root = doc.RootElement;
+            if (outer.RootElement.ValueKind != JsonValueKind.Object) throw new FormatException("not an object");
+            using var inner = outer.RootElement.TryGetProperty("body", out var body)
+                ? body.ValueKind == JsonValueKind.String ? JsonDocument.Parse(body.GetString()!) : throw new FormatException("no body")
+                : null;
+            var root = inner?.RootElement ?? outer.RootElement;
             if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("regions", out var regions) || regions.ValueKind != JsonValueKind.Array)
                 throw new FormatException("no regions");
             var result = new Dictionary<string, OutageRegion>(StringComparer.Ordinal);
             foreach (var r in regions.EnumerateArray())
             {
-                if (r.ValueKind != JsonValueKind.Object || Str(r, "cpu") is not { Length: > 0 } id) continue;
+                if (r.ValueKind != JsonValueKind.Object || Str(r, "cpu") is not { Length: > 0 } cpu) continue;
+                var id = Aliases.GetValueOrDefault(cpu, cpu);
                 var queues = new Dictionary<string, IReadOnlyDictionary<string, int[]>>(StringComparer.Ordinal);
                 if (r.TryGetProperty("schedule", out var schedule) && schedule.ValueKind == JsonValueKind.Object)
                     foreach (var q in schedule.EnumerateObject())
