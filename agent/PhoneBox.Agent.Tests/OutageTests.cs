@@ -47,10 +47,33 @@ public sealed class OutageSourceTests
         Assert.Equal([2, 2, 1, 0], slots[..4]);
     }
 
+    [Fact]
+    public void ParsesThePlainLegacyFormatAndAliasesItsRegionIds()
+    {
+        var raw = JsonSerializer.Serialize(new
+        {
+            date_today = "2026-11-17",
+            date_tomorrow = "2026-11-18",
+            regions = new object[]
+            {
+                new { cpu = "harkivska-oblast", name_ua = "Харківська", name_ru = "Харьковская", name_en = "Kharkiv", schedule = new Dictionary<string, object> { ["1.1"] = new Dictionary<string, object> { ["2026-11-17"] = Slots(_ => 1) } } },
+                new { cpu = "chernivetska-oblast", name_ua = "Чернівецька", name_ru = "Черновицкая", name_en = "Chernivtsi", schedule = new Dictionary<string, object> { ["5"] = new Dictionary<string, object> { ["2026-11-17"] = Slots(i => i < 2 ? 2 : 1) } } },
+                new { cpu = "luganska-oblast", name_ua = "Луганська", name_ru = "Луганская", name_en = "Luhansk", schedule = (object?)null },
+            },
+        });
+        var data = OutageSource.Parse(raw);
+        Assert.True(data.Regions.ContainsKey("kharkivska-oblast"));
+        Assert.False(data.Regions.ContainsKey("harkivska-oblast"));
+        Assert.Equal([2, 2, 1], data.Regions["chernivetska-oblast"].Queues["5"]["2026-11-17"][..3]);
+        Assert.Empty(data.Regions["luganska-oblast"].Queues);
+        Assert.False(data.Regions["chernivetska-oblast"].Emergency);
+    }
+
     [Theory]
     [InlineData("not json")]
     [InlineData("""{"body":42}""")]
     [InlineData("""{"body":"{}"}""")]
+    [InlineData("""{"date_today":"2026-11-17"}""")]
     [InlineData("""{"body":"{\"date_today\":\"2026-11-17\",\"regions\":42}"}""")]
     public void MalformedInputThrowsFormatException(string raw) => Assert.Throws<FormatException>(() => OutageSource.Parse(raw));
 
@@ -165,12 +188,28 @@ public sealed class OutageMonitorTests : IDisposable
 
     private static HttpResponseMessage Json(string body) => new(System.Net.HttpStatusCode.OK) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
 
+    /// <summary>Legacy server: Chernivtsi groups (only there) and a current Lviv day (stale on the main server).</summary>
+    private static string Legacy() => System.Text.Json.JsonSerializer.Serialize(new
+    {
+        date_today = "2026-11-17",
+        date_tomorrow = "2026-11-18",
+        regions = new object[]
+        {
+            new { cpu = "chernivetska-oblast", name_ua = "Чернівецька", name_ru = "Черновицкая", name_en = "Chernivtsi", schedule = new Dictionary<string, object> { ["5"] = new Dictionary<string, object> { ["2026-11-17"] = OutageSourceTests.Slots(i => i is >= 20 and < 28 ? 2 : 1) } } },
+            new { cpu = "lvivska-oblast", name_ua = "Львівська", name_ru = "Львовская", name_en = "Lviv", schedule = new Dictionary<string, object> { ["3.1"] = new Dictionary<string, object> { ["2026-11-17"] = OutageSourceTests.Slots(i => i < 4 ? 2 : 1) } } },
+            new { cpu = "kiivska-oblast", name_ua = "Київська", name_ru = "Киевская", name_en = "Kyiv (legacy)", schedule = new Dictionary<string, object> { ["3.1"] = new Dictionary<string, object> { ["2026-11-17"] = OutageSourceTests.Slots(_ => 1) } } },
+        },
+    });
+
+    private static Func<HttpRequestMessage, HttpResponseMessage> Both(Func<HttpResponseMessage>? main = null, Func<HttpResponseMessage>? legacy = null) =>
+        req => req.RequestUri!.Host == new Uri(OutageMonitor.Url).Host ? (main ?? (() => Json(Body())))() : (legacy ?? (() => Json(Legacy())))();
+
     private OutageMonitor Monitor(ConfigStore cfg, FeedHttpTests.Fake handler) =>
         new(cfg, Microsoft.Extensions.Logging.Abstractions.NullLogger<OutageMonitor>.Instance) { Handler = handler, Now = () => _now };
 
     private async Task<OutageMonitor> Loaded()
     {
-        var m = Monitor(Config(), new FeedHttpTests.Fake(_ => Json(Body())));
+        var m = Monitor(Config(), new FeedHttpTests.Fake(Both()));
         await m.TickAsync(CancellationToken.None);
         return m;
     }
@@ -178,7 +217,7 @@ public sealed class OutageMonitorTests : IDisposable
     [Fact]
     public async Task NothingIsFetchedWithoutAShownWidget()
     {
-        var handler = new FeedHttpTests.Fake(_ => Json(Body()));
+        var handler = new FeedHttpTests.Fake(Both());
         using var m = Monitor(Config(pageEnabled: false), handler);
         await m.TickAsync(CancellationToken.None);
         Assert.Empty(handler.Seen);
@@ -188,18 +227,17 @@ public sealed class OutageMonitorTests : IDisposable
     [Fact]
     public async Task OneFetchPerIntervalForAnyNumberOfWidgets()
     {
-        var handler = new FeedHttpTests.Fake(_ => Json(Body()));
+        var handler = new FeedHttpTests.Fake(Both());
         using var m = Monitor(Config(widgets: 2), handler);
         await m.TickAsync(CancellationToken.None);
         await m.TickAsync(CancellationToken.None);
-        Assert.Single(handler.Seen);
-        Assert.Equal(new Uri(OutageMonitor.Url), handler.Seen[0]);
+        Assert.Equal([new Uri(OutageMonitor.Url), new Uri(OutageMonitor.LegacyUrl)], handler.Seen.OrderBy(u => u.Host == "dtek-api.svitlo-proxy.workers.dev" ? 0 : 1).ToArray());
         _now += (long)OutageMonitor.Interval.TotalMilliseconds - 1000;
         await m.TickAsync(CancellationToken.None);
-        Assert.Single(handler.Seen);
+        Assert.Equal(2, handler.Seen.Count);
         _now += 1000;
         await m.TickAsync(CancellationToken.None);
-        Assert.Equal(2, handler.Seen.Count);
+        Assert.Equal(4, handler.Seen.Count);
     }
 
     [Fact]
@@ -224,9 +262,59 @@ public sealed class OutageMonitorTests : IDisposable
     }
 
     [Fact]
-    public async Task StaleRegionHasNoRuns()
+    public async Task RegionOnlyOnTheLegacyServerIsServed()
     {
         using var m = await Loaded();
+        var v = m.View("chernivetska-oblast", "5");
+        Assert.True(v.Found);
+        Assert.Equal("Chernivtsi", v.Region!.NameEn);
+        Assert.Equal(["on", "off", "on"], v.Runs.Select(r => r.State).ToArray());
+    }
+
+    [Fact]
+    public async Task StaleMainRegionFallsBackToACurrentLegacyOne()
+    {
+        using var m = await Loaded();
+        var v = m.View("lvivska-oblast", "3.1");
+        Assert.False(v.Stale);
+        Assert.True(v.Found);
+        Assert.Equal("off", v.Runs[0].State);
+        Assert.Equal("Kyiv Region", m.View("kiivska-oblast", "3.1").Region!.NameEn); // a current main region wins
+    }
+
+    [Fact]
+    public async Task APlaceholderDayOfUnknownSlotsIsNotAFallback()
+    {
+        var placeholder = System.Text.Json.JsonSerializer.Serialize(new
+        {
+            date_today = "2026-11-17",
+            date_tomorrow = "2026-11-18",
+            regions = new object[] { new { cpu = "lvivska-oblast", name_ua = "Львівська", name_ru = "Львовская", name_en = "Lviv", schedule = new Dictionary<string, object> { ["3.1"] = new Dictionary<string, object> { ["2026-11-17"] = OutageSourceTests.Slots(_ => 0) } } } },
+        });
+        using var m = Monitor(Config(), new FeedHttpTests.Fake(Both(legacy: () => Json(placeholder))));
+        await m.TickAsync(CancellationToken.None);
+        var v = m.View("lvivska-oblast", "3.1");
+        Assert.True(v.Stale); // the main server's old schedule, honestly marked, rather than a day of nothing
+        Assert.Equal("Lviv Region", v.Region!.NameEn);
+    }
+
+    [Fact]
+    public async Task OneServerFailingKeepsTheOther()
+    {
+        using var m = Monitor(Config(), new FeedHttpTests.Fake(Both(main: () => new HttpResponseMessage(System.Net.HttpStatusCode.BadGateway))));
+        await m.TickAsync(CancellationToken.None);
+        var v = m.View("chernivetska-oblast", "5");
+        Assert.True(v.Found);
+        Assert.NotNull(v.Error);
+        Assert.Equal(_now, v.Updated);
+        Assert.Equal(0, m.View("odeska-oblast", "3.1").Updated); // only the main server has Odesa, and it never answered
+    }
+
+    [Fact]
+    public async Task StaleOnBothServersStaysStale()
+    {
+        using var m = Monitor(Config(), new FeedHttpTests.Fake(Both(legacy: () => Json("""{"date_today":"2026-11-17","date_tomorrow":"2026-11-18","regions":[]}"""))));
+        await m.TickAsync(CancellationToken.None);
         var v = m.View("lvivska-oblast", "3.1");
         Assert.True(v.Stale);
         Assert.Empty(v.Runs);
@@ -253,6 +341,10 @@ public sealed class OutageMonitorTests : IDisposable
     [InlineData("abc", null)]
     [InlineData("3.1; rm", null)]
     [InlineData("٣.١", null)] // non-ASCII digits match \d but aren't queue ids
+    [InlineData("5", "5")]     // Chernivtsi and Donetsk number whole groups
+    [InlineData(" 05 ", "5")]
+    [InlineData("12", "12")]
+    [InlineData("123", null)]
     [InlineData("", null)]
     [InlineData(null, null)]
     public void QueueIsNormalizedAndValidated(string? given, string? expected) => Assert.Equal(expected, OutageMonitor.NormalizeQueue(given));
@@ -298,7 +390,7 @@ public sealed class OutageMonitorTests : IDisposable
     public async Task FailedFetchKeepsLastDataAndError()
     {
         var fail = false;
-        var handler = new FeedHttpTests.Fake(_ => fail ? new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError) : Json(Body()));
+        var handler = new FeedHttpTests.Fake(Both(() => fail ? new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError) : Json(Body())));
         using var m = Monitor(Config(), handler);
         await m.TickAsync(CancellationToken.None);
         var updated = m.View("kiivska-oblast", "3.1").Updated;
@@ -306,7 +398,7 @@ public sealed class OutageMonitorTests : IDisposable
         _now += (long)OutageMonitor.Interval.TotalMilliseconds;
         await m.TickAsync(CancellationToken.None);
         var v = m.View("kiivska-oblast", "3.1");
-        Assert.Equal(2, handler.Seen.Count);
+        Assert.Equal(4, handler.Seen.Count);
         Assert.NotNull(v.Error);
         Assert.Equal(updated, v.Updated);
         Assert.NotEmpty(v.Runs);
@@ -316,6 +408,7 @@ public sealed class OutageMonitorTests : IDisposable
     public async Task MalformedAnswerIsAnErrorNotACrash()
     {
         using var m = Monitor(Config(), new FeedHttpTests.Fake(_ => Json("<html>busy</html>")));
+        // neither server answers with a schedule
         await m.TickAsync(CancellationToken.None);
         var v = m.View("kiivska-oblast", "3.1");
         Assert.Equal("not a schedule", v.Error);
@@ -325,7 +418,7 @@ public sealed class OutageMonitorTests : IDisposable
     [Fact]
     public void BeforeAnyFetchThereIsNothing()
     {
-        using var m = Monitor(Config(), new FeedHttpTests.Fake(_ => Json(Body())));
+        using var m = Monitor(Config(), new FeedHttpTests.Fake(Both()));
         var v = m.View("kiivska-oblast", "3.1");
         Assert.Equal(0, v.Updated);
         Assert.Null(v.Region);

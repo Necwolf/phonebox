@@ -125,3 +125,13 @@ test('the day strip dims when the data is no longer fresh', async ({ page }) => 
   await expect(w.locator('.ou-n')).toHaveText('No fresh data');
   expect(await opacity()).toBeLessThan(1);
 });
+
+test('until power off is red, until power on is green', async ({ page }) => {
+  const w = await open(page, { region: 'kiivska-oblast', queue: '3.1' });
+  const color = () => w.locator('.ou-v').evaluate((e) => getComputedStyle(e).color);
+  await expect(w.locator('.ou-l')).toHaveText('Until power off');
+  expect(await color()).toBe('rgb(248, 113, 113)');
+  await page.clock.fastForward('00:41:00');
+  await expect(w.locator('.ou-l')).toHaveText('Until power on');
+  expect(await color()).toBe('rgb(74, 222, 128)');
+});
